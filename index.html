@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vision Stack Workshop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- APP SHELL -->
+  <div class="app-shell" id="appShell">
+
+    <!-- MAIN PANEL -->
+    <main class="main-panel" id="mainPanel">
+
+      <!-- PHASE HEADER -->
+      <header class="phase-header" id="phaseHeader">
+        <div class="phase-breadcrumb" id="phaseBreadcrumb">
+          <span class="breadcrumb-item active" data-phase="setup">Setup</span>
+          <span class="breadcrumb-sep">›</span>
+          <span class="breadcrumb-item" data-phase="principles">Principles</span>
+          <span class="breadcrumb-sep">›</span>
+          <span class="breadcrumb-item" data-phase="purpose">Purpose</span>
+          <span class="breadcrumb-sep">›</span>
+          <span class="breadcrumb-item" data-phase="mission">Mission</span>
+          <span class="breadcrumb-sep">›</span>
+          <span class="breadcrumb-item" data-phase="strategy">Strategy</span>
+          <span class="breadcrumb-sep">›</span>
+          <span class="breadcrumb-item" data-phase="okrs">OKRs</span>
+          <span class="breadcrumb-sep">›</span>
+          <span class="breadcrumb-item" data-phase="output">Output</span>
+        </div>
+        <!-- Presence bar (shown in multiplayer mode) -->
+        <div class="presence-bar" id="presenceBar" style="display:none"></div>
+      </header>
+
+      <!-- PHASE CONTENT (rendered by JS) -->
+      <div class="phase-content" id="phaseContent"></div>
+
+    </main>
+
+    <!-- SIDEBAR: STACK VISUALIZER -->
+    <aside class="stack-sidebar" id="stackSidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <rect x="1" y="1" width="16" height="3.5" rx="1.5" fill="currentColor" opacity="0.25"/>
+            <rect x="1" y="6" width="16" height="3.5" rx="1.5" fill="currentColor" opacity="0.45"/>
+            <rect x="1" y="11" width="16" height="3.5" rx="1.5" fill="currentColor" opacity="0.65"/>
+            <rect x="1" y="16" width="16" height="1.5" rx="0.75" fill="currentColor" opacity="0.9"/>
+          </svg>
+        </div>
+        <h2 class="sidebar-title">Vision Stack</h2>
+      </div>
+
+      <div class="stack-layers" id="stackLayers">
+
+        <div class="stack-layer" id="layer-principles" data-layer="principles">
+          <div class="layer-label">
+            <span class="layer-icon">◆</span>
+            <span>Principles</span>
+            <span class="layer-tag">How we work</span>
+          </div>
+          <div class="layer-content empty" id="layer-principles-content">
+            <p class="layer-empty-text">Not yet defined</p>
+          </div>
+        </div>
+
+        <div class="stack-layer" id="layer-purpose" data-layer="purpose">
+          <div class="layer-label">
+            <span class="layer-icon">◆</span>
+            <span>Purpose</span>
+            <span class="layer-tag">Why we exist</span>
+          </div>
+          <div class="layer-content empty" id="layer-purpose-content">
+            <p class="layer-empty-text">Not yet defined</p>
+          </div>
+        </div>
+
+        <div class="stack-layer" id="layer-mission" data-layer="mission">
+          <div class="layer-label">
+            <span class="layer-icon">◆</span>
+            <span>Mission</span>
+            <span class="layer-tag">What we do</span>
+          </div>
+          <div class="layer-content empty" id="layer-mission-content">
+            <p class="layer-empty-text">Not yet defined</p>
+          </div>
+        </div>
+
+        <div class="stack-layer" id="layer-strategy" data-layer="strategy">
+          <div class="layer-label">
+            <span class="layer-icon">◆</span>
+            <span>Strategy</span>
+            <span class="layer-tag">How we win</span>
+          </div>
+          <div class="layer-content empty" id="layer-strategy-content">
+            <p class="layer-empty-text">Not yet defined</p>
+          </div>
+        </div>
+
+        <div class="stack-layer" id="layer-okrs" data-layer="okrs">
+          <div class="layer-label">
+            <span class="layer-icon">◆</span>
+            <span>OKRs</span>
+            <span class="layer-tag">How we measure</span>
+          </div>
+          <div class="layer-content empty" id="layer-okrs-content">
+            <p class="layer-empty-text">Not yet defined</p>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="progress-track">
+          <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+        </div>
+        <span class="progress-label" id="progressLabel">0 of 5 layers complete</span>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Socket.io loaded from server when running in multiplayer mode -->
+  <script>
+    // Only load socket.io if served from the Node server (not file://)
+    if (window.location.protocol !== 'file:') {
+      const s = document.createElement('script');
+      s.src = '/socket.io/socket.io.js';
+      document.head.appendChild(s);
+    }
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>
