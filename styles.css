@@ -132,6 +132,11 @@ body {
   color: var(--success);
 }
 
+.breadcrumb-item.completed:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .breadcrumb-sep {
   color: var(--text-tertiary);
   font-size: 12px;

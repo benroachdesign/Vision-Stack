@@ -194,8 +194,18 @@ function renderBreadcrumb() {
   const currentIdx = PHASES.indexOf(state.phase);
   items.forEach((el, i) => {
     el.classList.remove('active', 'completed');
-    if (i === currentIdx) el.classList.add('active');
-    else if (i < currentIdx) el.classList.add('completed');
+    if (i === currentIdx) {
+      el.classList.add('active');
+      el.style.cursor = '';
+      el.onclick = null;
+    } else if (i < currentIdx) {
+      el.classList.add('completed');
+      el.style.cursor = 'pointer';
+      el.onclick = () => goToPhase(el.dataset.phase);
+    } else {
+      el.style.cursor = '';
+      el.onclick = null;
+    }
   });
 }
 
@@ -312,10 +322,19 @@ function renderPhaseContent() {
 function renderLobby() {
   const isOnServer = window.location.protocol !== 'file:';
   const noServerNote = !isOnServer
-    ? `<p class="lobby-server-note">
+    ? `<div class="lobby-server-note">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
-        Multiplayer requires the Node server. Run <code>npm install && npm start</code>, then open <code>http://localhost:3000</code>.
-      </p>` : '';
+        <span>
+          <strong>Multiplayer &amp; AI require the Node server.</strong><br/>
+          Open a terminal in this folder and run:<br/>
+          <code>ANTHROPIC_API_KEY=sk-ant-… npm start</code><br/>
+          Then visit <code>http://localhost:3000</code>
+        </span>
+      </div>`
+    : `<div id="lobbyAiStatus" style="display:inline-flex;align-items:center;gap:7px;padding:5px 13px;border-radius:99px;border:1px solid #e4e4e7;background:#fafafa;font-size:12px;color:#71717a;margin-top:6px;transition:all .3s">
+        <span id="lobbyAiDot" style="width:7px;height:7px;border-radius:50%;background:#d4d4d8;flex-shrink:0;transition:background .4s"></span>
+        <span id="lobbyAiStatusText">Checking AI status…</span>
+      </div>`;
 
   return `
     <div class="lobby-view">
@@ -427,6 +446,35 @@ function attachLobbyListeners() {
       codeInput.value = codeInput.value.toUpperCase();
       codeInput.setSelectionRange(pos, pos);
     });
+  }
+
+  // Check AI availability and update status badge
+  if (window.location.protocol !== 'file:') {
+    fetch('/api/health')
+      .then(r => r.json())
+      .then(({ aiEnabled }) => {
+        const dot    = document.getElementById('lobbyAiDot');
+        const txt    = document.getElementById('lobbyAiStatusText');
+        const badge  = document.getElementById('lobbyAiStatus');
+        if (!dot || !txt || !badge) return;
+        if (aiEnabled) {
+          dot.style.background        = '#16a34a';
+          txt.textContent             = 'AI synthesis ready';
+          badge.style.background      = '#f0fdf4';
+          badge.style.borderColor     = '#bbf7d0';
+          badge.style.color           = '#15803d';
+        } else {
+          dot.style.background        = '#d97706';
+          txt.innerHTML               = 'AI not configured — set <code style="background:#fef3c7;padding:1px 5px;border-radius:3px;font-size:11px">ANTHROPIC_API_KEY</code> and restart';
+          badge.style.background      = '#fffbeb';
+          badge.style.borderColor     = '#fde68a';
+          badge.style.color           = '#92400e';
+        }
+      })
+      .catch(() => {
+        const badge = document.getElementById('lobbyAiStatus');
+        if (badge) badge.style.display = 'none';
+      });
   }
 }
 
@@ -755,6 +803,10 @@ function renderSetup() {
           In under four hours, your team will align on <strong>Principles, Purpose, Mission, Strategy,</strong> and <strong>OKRs</strong> —
           the five layers that define how you work, why you exist, and how you measure success.
         </p>
+        <div id="setupAiNote" style="display:none;margin-top:12px;padding:10px 14px;border-radius:10px;border:1px solid #fde68a;background:#fffbeb;font-size:13px;color:#92400e;line-height:1.5">
+          <strong>AI synthesis is not configured.</strong> You can still run the full workshop — the AI step will return example output instead of real synthesis.
+          To enable AI: restart the server with <code style="background:#fef3c7;padding:1px 5px;border-radius:3px">ANTHROPIC_API_KEY=sk-ant-…</code> set.
+        </div>
       </div>
       <div class="setup-fields">
         <div class="field-group">
@@ -1157,6 +1209,19 @@ function attachSetupListeners() {
   bindInput('teamNameInput',    v => state.teamName    = v);
   bindInput('facilitatorInput', v => state.facilitator = v);
   on('startWorkshopBtn', 'click', e => { addRipple(e); goToPhase('principles'); });
+
+  // Show AI warning if server is running but key is missing
+  if (window.location.protocol !== 'file:') {
+    fetch('/api/health')
+      .then(r => r.json())
+      .then(({ aiEnabled }) => {
+        if (!aiEnabled) {
+          const note = document.getElementById('setupAiNote');
+          if (note) note.style.display = 'block';
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 function attachPrinciplesListeners() {
@@ -1416,6 +1481,45 @@ function attachOptionGrid(gridId, { onToggle, onEdit, finalizeId, onFinalize }) 
 // AI SYNTHESIS
 // ============================================================
 
+function gatherInputs(phase) {
+  const vals = arr => arr.map(ideaValue).filter(v => v.trim());
+  switch (phase) {
+    case 'principles':
+      return { ideas: vals(state.principles.ideas) };
+    case 'purpose':
+      return {
+        who:      vals(state.purpose.who),
+        struggle: vals(state.purpose.struggle),
+        change:   vals(state.purpose.change),
+      };
+    case 'mission':
+      return {
+        drafts: state.mission.drafts.filter(
+          d => d.solution.trim() || d.audience.trim() || d.outcome.trim()
+        ),
+      };
+    case 'strategy': {
+      const s = state.strategy;
+      return {
+        clusters: {
+          ux:        vals(s.clusters.ux),
+          technical: vals(s.clusters.technical),
+          process:   vals(s.clusters.process),
+          custom:    vals(s.clusters.custom),
+        },
+        customLabel: s.customLabel,
+      };
+    }
+    case 'okrs':
+      return {
+        objectives:  state.okrs.objectives.filter(o => o.trim()),
+        metricIdeas: vals(state.okrs.metricIdeas),
+      };
+    default:
+      return {};
+  }
+}
+
 async function runSynthesis(phase) {
   const btn = document.getElementById('synthesizeBtn');
   if (!btn) return;
@@ -1428,8 +1532,36 @@ async function runSynthesis(phase) {
     session.socket.emit('ai:thinking', { phase });
   }
 
-  await delay(1800);
-  const result = mockAISynthesis(phase);
+  let result;
+  if (window.location.protocol === 'file:') {
+    // No server available in file:// mode — use mock data
+    await delay(1800);
+    result = mockAISynthesis(phase);
+  } else {
+    try {
+      const resp = await fetch('/api/synthesize', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ phase, inputs: gatherInputs(phase) }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: resp.statusText }));
+        throw new Error(err.error || 'AI synthesis failed');
+      }
+      const data = await resp.json();
+      result = data.result;
+    } catch (err) {
+      btn.classList.remove('loading');
+      btn.innerHTML = 'Synthesize with AI';
+      btn.disabled = false;
+      const flash = document.createElement('p');
+      flash.style.cssText = 'color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-top:12px;font-size:13px;';
+      flash.textContent = '⚠ ' + (err.message || 'AI synthesis failed. Please try again.');
+      btn.insertAdjacentElement('afterend', flash);
+      setTimeout(() => flash.remove(), 8000);
+      return;
+    }
+  }
 
   switch (phase) {
     case 'principles': state.principles.aiResult = result; state.principles.selected = new Set(); break;

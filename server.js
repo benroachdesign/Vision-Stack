@@ -13,7 +13,120 @@ const app        = express();
 const httpServer = createServer(app);
 const io         = new Server(httpServer, { cors: { origin: '*' } });
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname)));
+
+// ---- AI SYNTHESIS ------------------------------------------
+
+function buildPrompt(phase, inputs) {
+  switch (phase) {
+    case 'principles': {
+      const list = inputs.ideas.map((v, i) => `${i + 1}. ${v}`).join('\n');
+      return `Act as an expert organizational designer. Review these team behaviors and cluster them into 4-6 distinct thematic principles. For each theme, provide a punchy, memorable title (2-4 words) and a 1-sentence description of the behavior.
+
+Team behaviors:
+${list}
+
+Respond with ONLY a valid JSON array, no markdown, no extra text:
+[{"title": "...", "description": "..."}, ...]`;
+    }
+    case 'purpose': {
+      return `Based on these team inputs about who we help, their struggles, and our impact, generate 7 distinct, inspiring Purpose Statements. Each must be exactly one sentence long, evoke emotion, and explain the fundamental reason this team exists.
+
+Who we help: ${inputs.who.join('; ')}
+Their biggest struggles: ${inputs.struggle.join('; ')}
+The change we create: ${inputs.change.join('; ')}
+
+Respond with ONLY a valid JSON array of exactly 7 strings, no markdown, no extra text:
+["statement 1", "statement 2", ...]`;
+    }
+    case 'mission': {
+      const lines = inputs.drafts.map((d, i) =>
+        `${i + 1}. We build ${d.solution || '...'} for ${d.audience || '...'} so they can ${d.outcome || '...'}`
+      ).join('\n');
+      return `I am facilitating a team strategy workshop. Analyze these rough mission statement drafts and synthesize the core ideas into exactly 4 polished, concise mission statements. Each should clearly define what we build, who it's for, and the outcome. Use the format "We build [X] for [Y] so they can [Z]."
+
+Drafts:
+${lines}
+
+Respond with ONLY a valid JSON array of exactly 4 strings, no markdown, no extra text:
+["We build ...", "We build ...", "We build ...", "We build ..."]`;
+    }
+    case 'strategy': {
+      const clusters = [
+        inputs.clusters.ux.length        && `UX & Design: ${inputs.clusters.ux.join(', ')}`,
+        inputs.clusters.technical.length && `Technical: ${inputs.clusters.technical.join(', ')}`,
+        inputs.clusters.process.length   && `Process & Operations: ${inputs.clusters.process.join(', ')}`,
+        inputs.clusters.custom.length    && `${inputs.customLabel || 'Other'}: ${inputs.clusters.custom.join(', ')}`,
+      ].filter(Boolean).join('\n');
+      return `We are establishing our strategic pillars. Act as a critical business strategist. First, synthesize these inputs into exactly 3 clear strategic pillars. Then write an aggressive critique: point out what we are failing to prioritize, the risks, and how to make these pillars more rigorous.
+
+Inputs:
+${clusters}
+
+Respond with ONLY a valid JSON object, no markdown, no extra text:
+{"pillars": [{"title": "...", "description": "..."}, {"title": "...", "description": "..."}, {"title": "...", "description": "..."}], "critique": "..."}`;
+    }
+    case 'okrs': {
+      const objLines = inputs.objectives.map((o, i) => `Objective ${i + 1}: ${o}`).join('\n');
+      return `Here are our Objectives and rough metric ideas. For each objective, generate exactly 4 distinct, SMART (Specific, Measurable, Achievable, Relevant, Time-bound) Key Results. Make them aggressive but realistic.
+
+${objLines}
+Rough metric ideas: ${inputs.metricIdeas.join(', ')}
+
+Respond with ONLY a valid JSON array (one object per objective), no markdown, no extra text:
+[{"objective": "...", "keyResults": ["...", "...", "...", "..."]}, ...]`;
+    }
+    default:
+      throw new Error(`Unknown phase: ${phase}`);
+  }
+}
+
+app.get('/api/health', (req, res) => {
+  res.json({ aiEnabled: !!process.env.ANTHROPIC_API_KEY });
+});
+
+app.post('/api/synthesize', async (req, res) => {
+  const { phase, inputs } = req.body || {};
+  if (!phase || !inputs) {
+    return res.status(400).json({ error: 'Missing phase or inputs' });
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: 'AI synthesis is not configured. Set the ANTHROPIC_API_KEY environment variable and restart the server.' });
+  }
+
+  try {
+    const Anthropic = require('@anthropic-ai/sdk');
+    const client    = new Anthropic({ apiKey });
+    const prompt    = buildPrompt(phase, inputs);
+
+    const message = await client.messages.create({
+      model:      'claude-opus-4-6',
+      max_tokens: 2048,
+      system:     'You are an expert facilitator and organizational strategist. Always respond with raw, valid JSON only — no markdown code fences, no prose, no explanations. Output must be directly parseable by JSON.parse().',
+      messages:   [{ role: 'user', content: prompt }],
+    });
+
+    const raw     = message.content[0]?.type === 'text' ? message.content[0].text : '';
+    const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    let result;
+    try {
+      result = JSON.parse(cleaned);
+    } catch (_) {
+      const m = cleaned.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+      if (!m) throw new Error('AI returned an unparseable response. Please try again.');
+      result = JSON.parse(m[1]);
+    }
+
+    res.json({ result });
+  } catch (err) {
+    console.error(`[AI synthesis] phase=${phase} error:`, err.message);
+    res.status(500).json({ error: err.message || 'AI synthesis failed' });
+  }
+});
 
 // ---- SESSION STORE -----------------------------------------
 
