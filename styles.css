@@ -2149,6 +2149,11 @@ body {
   font-weight: 800;
   letter-spacing: 0.12em;
   color: var(--accent);
+  transition: opacity .15s;
+}
+
+.presence-room-code:hover .presence-code-value {
+  opacity: 0.7;
 }
 
 .presence-divider {

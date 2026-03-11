@@ -86,10 +86,39 @@ app.get('/api/health', (req, res) => {
   res.json({ aiEnabled: !!process.env.ANTHROPIC_API_KEY });
 });
 
+function validateInputs(phase, inputs) {
+  switch (phase) {
+    case 'principles':
+      if (!inputs.ideas?.length)           return 'Add at least one idea before synthesizing.';
+      break;
+    case 'purpose':
+      if (!inputs.who?.length && !inputs.struggle?.length && !inputs.change?.length)
+                                           return 'Add ideas to at least one of the three prompts.';
+      break;
+    case 'mission':
+      if (!inputs.drafts?.length)          return 'Fill in at least one mission draft.';
+      break;
+    case 'strategy':
+      if (Object.values(inputs.clusters || {}).every(arr => !arr?.length))
+                                           return 'Add at least one idea to any cluster.';
+      break;
+    case 'okrs':
+      if (!inputs.objectives?.length)      return 'Add at least one Objective first.';
+      if (!inputs.metricIdeas?.length)     return 'Add at least one metric idea.';
+      break;
+  }
+  return null;
+}
+
 app.post('/api/synthesize', async (req, res) => {
   const { phase, inputs } = req.body || {};
   if (!phase || !inputs) {
     return res.status(400).json({ error: 'Missing phase or inputs' });
+  }
+
+  const validationError = validateInputs(phase, inputs);
+  if (validationError) {
+    return res.status(400).json({ error: validationError });
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;

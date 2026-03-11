@@ -226,13 +226,24 @@ function renderPresenceBar() {
     </div>`).join('');
 
   bar.innerHTML = `
-    <div class="presence-room-code">
+    <div class="presence-room-code" id="copyRoomCode" title="Click to copy room code" style="cursor:pointer">
       <span class="presence-code-label">Room</span>
-      <span class="presence-code-value">${session.roomCode}</span>
+      <span class="presence-code-value" id="roomCodeDisplay">${session.roomCode}</span>
     </div>
     <div class="presence-divider"></div>
     <div class="presence-avatars">${avatars}</div>
     <span class="presence-count">${session.presence.length} online</span>`;
+
+  document.getElementById('copyRoomCode')?.addEventListener('click', () => {
+    navigator.clipboard.writeText(session.roomCode).then(() => {
+      const el = document.getElementById('roomCodeDisplay');
+      if (!el) return;
+      const orig = el.textContent;
+      el.textContent = 'Copied!';
+      el.style.letterSpacing = '0';
+      setTimeout(() => { el.textContent = orig; el.style.letterSpacing = ''; }, 1500);
+    });
+  });
 }
 
 function renderSidebar() {
@@ -1143,10 +1154,16 @@ function renderOutput() {
       </div>
       <div class="output-actions">
         <button class="btn btn-ghost" id="backBtn">← Back to OKRs</button>
-        <button class="btn btn-print" onclick="window.print()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-          Print / Export PDF
-        </button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-ghost" id="downloadJsonBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download JSON
+          </button>
+          <button class="btn btn-print" onclick="window.print()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Print / Export PDF
+          </button>
+        </div>
       </div>
     </div>`;
 }
@@ -1208,7 +1225,30 @@ function attachEventListeners() {
 function attachSetupListeners() {
   bindInput('teamNameInput',    v => state.teamName    = v);
   bindInput('facilitatorInput', v => state.facilitator = v);
-  on('startWorkshopBtn', 'click', e => { addRipple(e); goToPhase('principles'); });
+
+  // Fresh start — clear any saved session
+  on('startWorkshopBtn', 'click', e => { addRipple(e); clearState(); goToPhase('principles'); });
+
+  // Inject resume button if saved state exists
+  const meta = getSavedMeta();
+  if (meta && meta.phase && meta.phase !== 'setup') {
+    const nav = document.querySelector('.phase-nav');
+    if (nav) {
+      const resumeBtn = document.createElement('button');
+      resumeBtn.className = 'btn btn-ghost';
+      resumeBtn.style.cssText = 'justify-content:center;';
+      const label = meta.teamName ? `"${meta.teamName}"` : 'previous session';
+      const phaseLabel = meta.phase.charAt(0).toUpperCase() + meta.phase.slice(1);
+      resumeBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg> Resume ${label} · ${phaseLabel}`;
+      resumeBtn.addEventListener('click', e => {
+        addRipple(e);
+        session.mode = 'solo';
+        restoreState();
+        render();
+      });
+      nav.insertBefore(resumeBtn, nav.firstChild);
+    }
+  }
 
   // Show AI warning if server is running but key is missing
   if (window.location.protocol !== 'file:') {
@@ -1378,6 +1418,29 @@ function attachOKRsListeners() {
   document.querySelectorAll('.sticky-input').forEach(autoResizeTextarea);
 }
 
+function downloadStackJSON() {
+  const today   = new Date();
+  const payload = {
+    teamName:   state.teamName   || 'Our Team',
+    facilitator: state.facilitator || '',
+    createdAt:  today.toISOString(),
+    stack: {
+      principles: state.stack.principles,
+      purpose:    state.stack.purpose,
+      mission:    state.stack.mission,
+      strategy:   state.stack.strategy,
+      okrs:       state.stack.okrs,
+    }
+  };
+  const slug = (state.teamName || 'team').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  const date = today.toISOString().slice(0, 10);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: `vision-stack-${slug}-${date}.json` });
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function attachOutputListeners() {
   [0, 1, 2].forEach(i => {
     const el = document.getElementById(`check${i}`);
@@ -1388,6 +1451,8 @@ function attachOutputListeners() {
       if (svg) svg.style.display = el.classList.contains('checked') ? 'block' : 'none';
     });
   });
+
+  on('downloadJsonBtn', 'click', e => { addRipple(e); downloadStackJSON(); });
 }
 
 
@@ -1520,7 +1585,21 @@ function gatherInputs(phase) {
   }
 }
 
+function hasEnoughInputs(phase) {
+  const inputs = gatherInputs(phase);
+  switch (phase) {
+    case 'principles': return inputs.ideas.length > 0;
+    case 'purpose':    return inputs.who.length > 0 || inputs.struggle.length > 0 || inputs.change.length > 0;
+    case 'mission':    return inputs.drafts.length > 0;
+    case 'strategy':   return Object.values(inputs.clusters).some(arr => arr.length > 0);
+    case 'okrs':       return inputs.objectives.length > 0 && inputs.metricIdeas.length > 0;
+    default:           return true;
+  }
+}
+
 async function runSynthesis(phase) {
+  if (!hasEnoughInputs(phase)) return;
+
   const btn = document.getElementById('synthesizeBtn');
   if (!btn) return;
   btn.classList.add('loading');
@@ -1641,6 +1720,71 @@ function emitSelection(phase, selection) {
 
 
 // ============================================================
+// PERSISTENCE (solo mode — localStorage)
+// ============================================================
+
+const STORAGE_KEY = 'vs:solo';
+
+function saveState() {
+  if (session.mode !== 'solo') return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      teamName:    state.teamName,
+      facilitator: state.facilitator,
+      phase:       state.phase,
+      stack:       state.stack,
+      principles:  { ideas: state.principles.ideas, aiResult: state.principles.aiResult, selected: [...state.principles.selected] },
+      purpose:     state.purpose,
+      mission:     state.mission,
+      strategy:    { clusters: state.strategy.clusters, customLabel: state.strategy.customLabel, aiResult: state.strategy.aiResult, selected: [...state.strategy.selected] },
+      okrs:        { objectives: state.okrs.objectives, metricIdeas: state.okrs.metricIdeas, aiResult: state.okrs.aiResult, selected: state.okrs.selected.map(s => [...s]) },
+    }));
+  } catch(e) {}
+}
+
+function restoreState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    state.teamName    = s.teamName    || '';
+    state.facilitator = s.facilitator || '';
+    state.phase       = s.phase       || 'principles';
+    state.stack       = s.stack       || state.stack;
+    if (s.principles) {
+      state.principles.ideas    = s.principles.ideas    || [''];
+      state.principles.aiResult = s.principles.aiResult || null;
+      state.principles.selected = new Set(s.principles.selected || []);
+    }
+    if (s.purpose)  Object.assign(state.purpose,  s.purpose);
+    if (s.mission)  Object.assign(state.mission,  s.mission);
+    if (s.strategy) {
+      Object.assign(state.strategy, s.strategy);
+      state.strategy.selected = new Set(s.strategy.selected || []);
+    }
+    if (s.okrs) {
+      Object.assign(state.okrs, s.okrs);
+      state.okrs.selected = (s.okrs.selected || []).map(arr => new Set(arr));
+    }
+    return true;
+  } catch(e) { return false; }
+}
+
+function clearState() {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+function getSavedMeta() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const { teamName, phase } = JSON.parse(raw);
+    return { teamName, phase };
+  } catch(e) { return null; }
+}
+
+
+// ============================================================
 // NAVIGATION
 // ============================================================
 
@@ -1649,6 +1793,7 @@ function goToPhase(phase) {
   if (session.mode === 'host' && session.socket) {
     session.socket.emit('phase:advance', { phase });
   }
+  saveState();
   render();
   document.getElementById('phaseContent').scrollTop = 0;
 }
