@@ -264,10 +264,23 @@ function renderSidebar() {
       layer.classList.add('populated');
       content.classList.remove('empty');
       content.innerHTML = renderSidebarLayer(key, data);
+
+      // Inject edit button (solo/host only, not participant)
+      if (session.mode !== 'participant') {
+        const label = layer.querySelector('.layer-label');
+        if (label && !label.querySelector('.layer-edit-btn')) {
+          const btn = document.createElement('button');
+          btn.className = 'layer-edit-btn';
+          btn.textContent = 'Edit';
+          btn.addEventListener('click', e => { e.stopPropagation(); goToPhase(key); });
+          label.appendChild(btn);
+        }
+      }
     } else {
       layer.classList.remove('populated');
       content.classList.add('empty');
       content.innerHTML = '<p class="layer-empty-text">Not yet defined</p>';
+      layer.querySelector('.layer-edit-btn')?.remove();
     }
   });
 
@@ -761,10 +774,31 @@ function renderAIBar(btnId, hint, disabled, hasResult) {
   return `
     <div class="ai-action-bar">
       <p class="ai-hint">${hint}</p>
-      <button class="btn btn-ai" id="${btnId}" ${disabled ? 'disabled' : ''}>
-        ${aiSparkIcon()}
-        ${hasResult ? 'Re-synthesize' : 'AI Synthesize'}
-      </button>
+      <div class="ai-action-btns">
+        <button class="btn btn-ghost btn-copy-prompt" id="copyPromptBtn" ${disabled ? 'disabled' : ''}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          Copy Prompt
+        </button>
+        <button class="btn btn-ai" id="${btnId}" ${disabled ? 'disabled' : ''}>
+          ${aiSparkIcon()}
+          ${hasResult ? 'Re-synthesize' : 'AI Synthesize'}
+        </button>
+      </div>
+    </div>
+    <div class="copy-prompt-panel" id="copyPromptPanel">
+      <div class="cpp-inner">
+        <div class="cpp-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Prompt copied — open any AI assistant, paste it in, then paste the response below
+        </div>
+        <div class="cpp-links">
+          <a href="https://claude.ai/new" target="_blank" rel="noopener" class="cpp-link cpp-claude">Claude.ai ↗</a>
+          <a href="https://chatgpt.com/" target="_blank" rel="noopener" class="cpp-link cpp-chatgpt">ChatGPT ↗</a>
+          <a href="https://gemini.google.com/" target="_blank" rel="noopener" class="cpp-link cpp-gemini">Gemini ↗</a>
+        </div>
+        <textarea class="cpp-textarea" id="pasteArea" placeholder="Paste the AI's response here — results appear automatically…" rows="4"></textarea>
+        <p class="cpp-parse-status" id="parseStatus"></p>
+      </div>
     </div>`;
 }
 
@@ -1264,6 +1298,136 @@ function attachSetupListeners() {
   }
 }
 
+// ============================================================
+// COPY-PROMPT FLOW (external LLM fallback)
+// ============================================================
+
+function buildPromptClient(phase) {
+  const inputs = gatherInputs(phase);
+  const jsonNote = '\n\nRespond with ONLY valid JSON — no markdown fences, no explanation.';
+
+  switch (phase) {
+    case 'principles': {
+      const list = inputs.ideas.map((v, i) => `${i + 1}. ${v}`).join('\n');
+      return `Act as an expert organizational designer. Review these team behaviors and cluster them into 4-6 distinct thematic principles. For each, provide a punchy title (2-4 words) and a 1-sentence description.
+
+Team behaviors:
+${list}${jsonNote}
+
+Format:
+[{"title": "...", "description": "..."}, ...]`;
+    }
+    case 'purpose': {
+      return `Based on these inputs, generate 7 distinct, inspiring one-sentence Purpose Statements that explain the fundamental reason this team exists.
+
+Who we help: ${inputs.who.join('; ')}
+Their biggest struggles: ${inputs.struggle.join('; ')}
+The change we create: ${inputs.change.join('; ')}${jsonNote}
+
+Format:
+["statement 1", "statement 2", ...]`;
+    }
+    case 'mission': {
+      const lines = inputs.drafts.map((d, i) =>
+        `${i + 1}. We build ${d.solution || '…'} for ${d.audience || '…'} so they can ${d.outcome || '…'}`
+      ).join('\n');
+      return `Synthesize these rough mission drafts into exactly 4 polished statements using the format "We build [X] for [Y] so they can [Z]."
+
+Drafts:
+${lines}${jsonNote}
+
+Format:
+["We build ...", "We build ...", "We build ...", "We build ..."]`;
+    }
+    case 'strategy': {
+      const clusters = [
+        inputs.clusters.ux.length        && `UX & Design: ${inputs.clusters.ux.join(', ')}`,
+        inputs.clusters.technical.length && `Technical: ${inputs.clusters.technical.join(', ')}`,
+        inputs.clusters.process.length   && `Process & Operations: ${inputs.clusters.process.join(', ')}`,
+        inputs.clusters.custom.length    && `${inputs.customLabel || 'Other'}: ${inputs.clusters.custom.join(', ')}`,
+      ].filter(Boolean).join('\n');
+      return `Act as a critical business strategist. Synthesize these inputs into exactly 3 strategic pillars, then write an aggressive critique pointing out risks and gaps.
+
+Inputs:
+${clusters}${jsonNote}
+
+Format:
+{"pillars": [{"title": "...", "description": "..."}, {"title": "...", "description": "..."}, {"title": "...", "description": "..."}], "critique": "..."}`;
+    }
+    case 'okrs': {
+      const objLines = inputs.objectives.map((o, i) => `Objective ${i + 1}: ${o}`).join('\n');
+      return `For each objective, generate exactly 4 SMART Key Results — specific, measurable, time-bound, aggressive but realistic.
+
+${objLines}
+Rough metric ideas: ${inputs.metricIdeas.join(', ')}${jsonNote}
+
+Format:
+[{"objective": "...", "keyResults": ["...", "...", "...", "..."]}, ...]`;
+    }
+    default: return '';
+  }
+}
+
+function parseAIResponse(text) {
+  const cleaned = text
+    .replace(/^```json\s*/im, '').replace(/^```\s*/im, '').replace(/\s*```\s*$/im, '')
+    .trim();
+  try { return JSON.parse(cleaned); } catch(_) {}
+  const m = cleaned.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+  if (m) { try { return JSON.parse(m[1]); } catch(_) {} }
+  return null;
+}
+
+function applyAIResult(phase, result) {
+  switch (phase) {
+    case 'principles': state.principles.aiResult = result; state.principles.selected = new Set(); break;
+    case 'purpose':    state.purpose.aiResult    = result; state.purpose.selectedIdx  = null; break;
+    case 'mission':    state.mission.aiResult    = result; state.mission.selectedIdx  = null; break;
+    case 'strategy':   state.strategy.aiResult   = result; state.strategy.selected    = new Set(); break;
+    case 'okrs':       state.okrs.aiResult        = result; state.okrs.selected        = result.map(() => new Set()); break;
+  }
+  if (session.mode === 'host' && session.socket) {
+    session.socket.emit('ai:result', { phase, result });
+  }
+  renderPhaseContent();
+  scrollToResults(null);
+}
+
+function attachAIBarListeners(phase) {
+  on('synthesizeBtn', 'click', e => { addRipple(e); runSynthesis(phase); });
+
+  on('copyPromptBtn', 'click', e => {
+    addRipple(e);
+    if (!hasEnoughInputs(phase)) return;
+    const prompt = buildPromptClient(phase);
+    const showPanel = () => {
+      const panel = document.getElementById('copyPromptPanel');
+      if (panel) panel.classList.add('visible');
+    };
+    navigator.clipboard.writeText(prompt).then(showPanel).catch(showPanel);
+  });
+
+  const pasteArea = document.getElementById('pasteArea');
+  if (pasteArea) {
+    pasteArea.addEventListener('input', () => {
+      const text   = pasteArea.value.trim();
+      const status = document.getElementById('parseStatus');
+      if (!text) { if (status) { status.textContent = ''; status.className = 'cpp-parse-status'; } return; }
+
+      const result = parseAIResponse(text);
+      if (result) {
+        if (status) { status.textContent = '✓ Parsed — applying results…'; status.className = 'cpp-parse-status success'; }
+        setTimeout(() => applyAIResult(phase, result), 500);
+      } else {
+        if (status) {
+          status.textContent = 'Could not parse that response. Try copying just the JSON block, or ask your AI to respond with JSON only.';
+          status.className = 'cpp-parse-status error';
+        }
+      }
+    });
+  }
+}
+
 function attachPrinciplesListeners() {
   const p = state.principles;
   setupStickyArea('stickiesArea', p.ideas, 'principles', null, 'addStickyBtn',
@@ -1271,7 +1435,7 @@ function attachPrinciplesListeners() {
     (ref) => { removeStickyByRef(p.ideas, ref); renderPhaseContent(); },
     (el) => { setStickyValue(p.ideas, el); refreshAIBtn('synthesizeBtn', p.ideas.some(s => ideaValue(s).trim())); }
   );
-  on('synthesizeBtn', 'click', e => { addRipple(e); runSynthesis('principles'); });
+  attachAIBarListeners('principles');
   attachOptionGrid('optionCardsGrid', {
     onToggle: (idx) => {
       p.selected.has(idx) ? p.selected.delete(idx) : p.selected.add(idx);
@@ -1297,7 +1461,7 @@ function attachPurposeListeners() {
       () => { refreshAIBtn('synthesizeBtn', [...p.who,...p.struggle,...p.change].some(s=>ideaValue(s).trim())); }
     );
   });
-  on('synthesizeBtn', 'click', e => { addRipple(e); runSynthesis('purpose'); });
+  attachAIBarListeners('purpose');
   const grid = document.getElementById('purposeCardsGrid');
   if (grid) {
     grid.addEventListener('click', e => {
@@ -1335,7 +1499,7 @@ function attachMissionListeners() {
     });
   }
   on('addDraftBtn', 'click', () => { m.drafts.push({ solution:'', audience:'', outcome:'' }); renderPhaseContent(); });
-  on('synthesizeBtn', 'click', e => { addRipple(e); runSynthesis('mission'); });
+  attachAIBarListeners('mission');
   const grid = document.getElementById('missionCardsGrid');
   if (grid) {
     grid.addEventListener('click', e => {
@@ -1367,7 +1531,7 @@ function attachStrategyListeners() {
     s.customLabel = v;
     if (session.mode === 'host' && session.socket) session.socket.emit('strategy:customLabel', { label: v });
   });
-  on('synthesizeBtn', 'click', e => { addRipple(e); runSynthesis('strategy'); });
+  attachAIBarListeners('strategy');
   attachOptionGrid('strategyCardsGrid', {
     onToggle: (idx) => {
       if (s.selected.has(idx)) s.selected.delete(idx);
@@ -1399,7 +1563,7 @@ function attachOKRsListeners() {
     (ref) => { removeStickyByRef(o.metricIdeas, ref); renderPhaseContent(); },
     () => { refreshAIBtn('synthesizeBtn', o.objectives[0].trim() && o.metricIdeas.some(s=>ideaValue(s).trim())); }
   );
-  on('synthesizeBtn', 'click', e => { addRipple(e); runSynthesis('okrs'); });
+  attachAIBarListeners('okrs');
   if (o.aiResult) {
     o.aiResult.forEach((_, objIdx) => {
       const grid = document.getElementById(`krGrid-${objIdx}`);
